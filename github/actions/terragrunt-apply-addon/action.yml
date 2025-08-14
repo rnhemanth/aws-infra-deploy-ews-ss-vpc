@@ -1,0 +1,16 @@
+name: "Deploy Network addons"
+description: Deploys AWS infrastructure(Network Addons) using Terraform
+
+runs:
+  using: "composite"
+
+  steps:
+    - name: Install terragrunt
+      run: make setup
+      working-directory: ./buildserver
+      shell: bash
+
+    - name: Deploy infrastructure
+      run: make terragrunt-apply-addon
+      working-directory: ./buildserver
+      shell: bash

@@ -1,0 +1,41 @@
+name: 'Terragrunt Plan'
+description: 'Run Terraform plan against running infrastructure, add plan as comment to PR'
+
+inputs:
+  terraform-folder:
+    description: 'relative path from buildserver to folder where terraform resources are defined for this action'
+    required: true
+  terragrunt-config:
+    description: 'relative path from terraform folder to terragrunt.hcl'
+    required: true
+
+runs:
+  using: "composite"
+  steps:
+    - name: Install terragrunt
+      run: make setup
+      working-directory: ./buildserver
+      shell: bash
+
+    - name: Terragrunt plan
+      run: make terragrunt-plan
+      working-directory: ./buildserver
+      shell: bash
+      env:
+        terraform_folder: ${{ inputs.terraform-folder }}
+        terragrunt_config: ${{ inputs.terragrunt-config }}
+
+    - name: Find plan comment
+      uses: peter-evans/find-comment@v2
+      id: fc
+      with:
+        issue-number: ${{ github.event.pull_request.number }}
+        comment-author: 'github-actions[bot]'
+
+    - name: Write comment with plan
+      uses: peter-evans/create-or-update-comment@v2
+      with:
+        comment-id: ${{ steps.fc.outputs.comment-id }}
+        issue-number: ${{ github.event.pull_request.number }}
+        body-file: plan.out
+        edit-mode: replace

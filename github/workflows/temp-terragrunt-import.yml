@@ -1,0 +1,75 @@
+name: TEMP Terragrunt Import
+on: workflow_dispatch
+concurrency: prd
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  deploy:
+    if: github.event_name == 'workflow_dispatch'
+    name: Import - Network resources
+    runs-on: ubuntu-latest
+    defaults:
+        run:
+          working-directory: ./buildserver/
+    environment:
+      name: prd
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: terraform version
+        uses: hashicorp/setup-terraform@v3
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.DEPLOYER_ROLE_ARN }}
+          role-session-name: deploy-role-session
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - uses: navikt/github-app-token-generator@v1
+        id: get-token
+        with:
+          private-key: ${{ secrets.APP_PRIVATE_KEY }}
+          app-id: ${{ secrets.APP_ID }}
+          
+      - name: Pull & update submodules recursively
+        run: |
+          git config --global url."https://token:${GH_TOKEN}@github.com/emisgroup".insteadOf "https://github.com/emisgroup"
+          git config --file=.gitmodules aws-infra-deploy-ews-ss-vpc.url https://token:${GH_TOKEN}@github.com/emisgroup/aws-infra-deploy-ews-ss-vpc.git
+          git submodule update --init --recursive
+        env:
+          GH_TOKEN : ${{ steps.get-token.outputs.token }}
+
+      - name: Run Checkov
+        uses: bridgecrewio/checkov-action@master
+        with:
+          directory: aws-ew-ss-network/terraform/
+          framework : terraform
+
+      - name: Terragrunt Import
+        env:
+          AWS_ACCOUNT_ID: ${{ secrets.AWS_ACCOUNT_ID }}
+          AWS_REGION : ${{ vars.AWS_REGION }}
+          ENVIRONMENT : ${{ vars.ENVIRONMENT }}
+          GH_TOKEN : ${{ steps.get-token.outputs.token }}
+        uses: ./temp_import/actions/terragrunt-import
+        with:
+          terraform-folder: "../aws-ew-ss-network/terraform/"
+          terragrunt-config: "../terragrunt.hcl"
+
+      - name: Terragrunt Import Addons
+        env:
+          AWS_ACCOUNT_ID: ${{ secrets.AWS_ACCOUNT_ID }}
+          AWS_REGION : ${{ vars.AWS_REGION }}
+          ENVIRONMENT : ${{ vars.ENVIRONMENT }}
+          GH_TOKEN : ${{ steps.get-token.outputs.token }}
+        uses: ./temp_import/actions/terragrunt-import-addons
+        with:
+          terraform-folder: "../aws-ew-ss-network/terraform/addons/"
+          terragrunt-config: "./terragrunt.hcl"

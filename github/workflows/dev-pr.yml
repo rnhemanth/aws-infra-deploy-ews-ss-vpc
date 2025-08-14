@@ -1,0 +1,77 @@
+name: Dev - Pull Request
+on:
+  pull_request:
+    branches:
+      - 'develop'
+
+permissions:
+  id-token: write
+  contents: read
+  pull-requests: write
+
+jobs:
+  deploy:
+    name: Pull Request - Lint & Plan - Dev
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ./buildserver/
+    environment:
+      name: dev
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@93ea575cb5d8a053eaa0ac8fa3b40d7e05a33cc8
+        with:
+          fetch-depth: 0 
+     
+      - name: terraform version
+        uses: hashicorp/setup-terraform@v3
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@2aed65ee75445524c50e08d1c0070bc9bd72c9d1
+        with:
+          role-to-assume: ${{ secrets.DEPLOYER_ROLE_ARN }}
+          role-session-name: deploy-role-session
+          aws-region: ${{ vars.AWS_REGION }}
+  
+      - uses: navikt/github-app-token-generator@2d70c12368d1958155af4d283f9f21c9a2a8cb98
+        id: get-token
+        with:
+          private-key: ${{ secrets.APP_PRIVATE_KEY }}
+          app-id: ${{ secrets.APP_ID }}
+        
+      - name: Pull & update submodules recursively
+        run: |
+          git config --global url."https://token:${GH_TOKEN}@github.com/emisgroup".insteadOf "https://github.com/emisgroup"
+          git config --file=.gitmodules aws-infra-deploy-ews-ss-vpc.url https://token:${GH_TOKEN}@github.com/emisgroup/aws-infra-deploy-ews-ss-vpc.git
+          git submodule update --init --recursive
+        env:
+          GH_TOKEN : ${{ steps.get-token.outputs.token }}
+
+      - name: Run Checkov
+        uses: bridgecrewio/checkov-action@master
+        with:
+          directory: aws-ew-ss-network/terraform/
+          framework : terraform
+
+      - name: Plan Terragrunt - VPC
+        env:
+          AWS_ACCOUNT_ID: ${{ secrets.AWS_ACCOUNT_ID }}
+          AWS_REGION : ${{ vars.AWS_REGION }}
+          ENVIRONMENT : ${{ vars.ENVIRONMENT }}
+          GH_TOKEN : ${{ steps.get-token.outputs.token }}
+        with:
+          terraform-folder: "../aws-ew-ss-network/terraform/"
+          terragrunt-config: "../terragrunt.hcl"
+        uses: ./.github/actions/terragrunt-plan
+
+      - name: Plan Terragrunt - Network Addons
+        env:
+          AWS_ACCOUNT_ID: ${{ secrets.AWS_ACCOUNT_ID }}
+          AWS_REGION : ${{ vars.AWS_REGION }}
+          ENVIRONMENT : ${{ vars.ENVIRONMENT }}
+          GH_TOKEN : ${{ steps.get-token.outputs.token }}
+        with:
+          terraform-folder: "../aws-ew-ss-network/terraform/addons/"
+          terragrunt-config: "./terragrunt.hcl"
+        uses: ./.github/actions/terragrunt-plan
